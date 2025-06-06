@@ -221,7 +221,7 @@ def search_items():
         if q:
             search_params["q"] = q
 
-        # Resolve collection
+        # Enhanced: resolve full collection + subcollections
         if collection_name:
             if collection_name.startswith("collectionkey:"):
                 collection_key = collection_name.split(":", 1)[-1].strip()
@@ -231,7 +231,7 @@ def search_items():
                 if collection_keys:
                     search_params["collection"] = ",".join(collection_keys)
 
-        # Initial fetch
+        # Main search
         item_res = requests.get(
             f"{ZOTERO_BASE_URL}/users/{user_id}/items",
             headers=headers,
@@ -251,7 +251,7 @@ def search_items():
                 for i in items
             ])
 
-        # Retry without collection
+        # Retry: broader search ignoring collection
         if q:
             broader_res = requests.get(
                 f"{ZOTERO_BASE_URL}/users/{user_id}/items",
@@ -273,7 +273,7 @@ def search_items():
                     for i in fuzzy_hits
                 ])
 
-            # Final fallback: split query
+            # Final fallback: split query into words
             keywords = q.split()
             keyword_hits = []
             for word in keywords:
