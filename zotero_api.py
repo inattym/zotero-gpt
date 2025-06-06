@@ -528,7 +528,7 @@ def summarize_collection():
                                 "creators": creators,
                                 "text": text
                             })
-                        break
+                        
             elif data.get("contentType") == "application/pdf":
                 # Standalone PDF item
                 text = extract_pdf_text(api_key, user_id, key, headers)
