@@ -332,8 +332,8 @@ def get_notes():
 def read_pdf():
     api_key = request.args.get("api_key")
     item_key = request.args.get("itemKey")
-    title = request.args.get("title")  # Optional: fuzzy fallback
-    collection_name = request.args.get("collection")  # Optional: scope filter
+    title = request.args.get("title", "").strip()
+    collection_name = request.args.get("collection", "").strip().lower()
 
     if not api_key:
         return jsonify({"error": "Missing api_key"}), 400
@@ -342,12 +342,13 @@ def read_pdf():
         headers = get_headers(api_key)
         user_id = get_user_id(api_key)
 
+        # Step 1: Try to resolve itemKey from fuzzy title if not provided
         if not item_key and title:
             search_params = {
                 "format": "json",
                 "q": title,
                 "qmode": "title",
-                "limit": 5
+                "limit": 20
             }
 
             if collection_name:
@@ -362,36 +363,37 @@ def read_pdf():
             )
             items = item_res.json()
 
+            # Fallback with broad query
             if not items:
-                # Fallback with broad search
-                broader_res = requests.get(
+                fallback_res = requests.get(
                     f"{ZOTERO_BASE_URL}/users/{user_id}/items",
                     headers=headers,
                     params={"format": "json", "q": title, "limit": 100}
                 )
-                items = broader_res.json()
+                items = fallback_res.json()
 
             if collection_name:
                 filtered = fuzzy_match_multi_field(items, collection_name)
                 if filtered:
                     item_key = filtered[0].get("key")
             else:
-                if not items and title:
-                    items = fuzzy_match_multi_field(items, title)
-                item_key = items[0].get("key") if items else None
+                fuzzy_filtered = fuzzy_match_multi_field(items, title)
+                if fuzzy_filtered:
+                    item_key = fuzzy_filtered[0].get("key")
 
             if not item_key and items:
                 return jsonify({
-                    "message": f"Multiple PDFs match '{title}'",
+                    "message": f"Multiple items matched '{title}', but no clear PDF selected.",
                     "candidates": [
-                        {"title": i['data'].get("title", "Untitled"), "key": i["key"]}
+                        {"title": i["data"].get("title", "Untitled"), "key": i["key"]}
                         for i in items[:3]
                     ]
                 })
 
         if not item_key:
-            return jsonify({"error": "Could not resolve itemKey from title or collection"}), 404
+            return jsonify({"error": "Missing itemKey or unable to resolve one from title"}), 404
 
+        # Step 2: Download and read PDF file
         file_res = requests.get(
             f"{ZOTERO_BASE_URL}/users/{user_id}/items/{item_key}/file",
             headers=headers,
@@ -399,20 +401,30 @@ def read_pdf():
         )
 
         if file_res.status_code != 200:
-            return jsonify({"error": "Could not download file"}), file_res.status_code
+            return jsonify({"error": "Could not download PDF file"}), file_res.status_code
 
-        with open("temp.pdf", "wb") as f:
+        temp_path = "temp.pdf"
+        with open(temp_path, "wb") as f:
             for chunk in file_res.iter_content(chunk_size=8192):
                 f.write(chunk)
 
-        doc = fitz.open("temp.pdf")
+        # Step 3: Extract text from PDF using PyMuPDF
+        doc = fitz.open(temp_path)
         text = "\n".join([page.get_text() for page in doc])
         doc.close()
+        os.remove(temp_path)
 
-        return jsonify({"text": text[:10000]})  # Trim for safety
+        return jsonify({"text": text[:10000]})  # limit for safety
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+
+
+
+
+
 
 # Serve static files
 @app.route("/openapi.yaml")
