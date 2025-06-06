@@ -50,8 +50,10 @@ paths:
   /items:
     get:
       operationId: searchItems
-      summary: Search for items by keyword
-      description: Searches all items in the user's personal and group Zotero collections.
+      summary: Search for items by keyword or within a collection
+      description: >
+        Searches all items in the user's personal and group Zotero collections.
+        Optionally filters by collection key.
       parameters:
         - name: api_key
           in: query
@@ -65,9 +67,15 @@ paths:
           required: false
           schema:
             type: string
+        - name: collection
+          in: query
+          description: Optional Zotero collection key to restrict the search scope
+          required: false
+          schema:
+            type: string
       responses:
         "200":
-          description: A list of Zotero items matching the query
+          description: A list of Zotero items matching the query or collection
 
   /notes:
     get:
