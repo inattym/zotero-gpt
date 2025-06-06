@@ -169,6 +169,37 @@ paths:
         "200":
           description: Collection summary with themes, items, and any content divergence
 
+
+
+  /collection_tree_preview:
+    get:
+      summary: Get formatted hierarchical preview of all Zotero collections
+      description: |
+        Returns a plain-text indented tree of all collections and subcollections, including group and personal libraries. Useful for visualizing nested folder structures.
+      parameters:
+        - name: api_key
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Zotero API key
+      responses:
+        '200':
+          description: Tree-formatted text of collections
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  text:
+                    type: string
+        '400':
+          description: Missing API key
+        '500':
+          description: Server error or Zotero API failure
+
+    
+
 # Optional for future:
 #  /extract_themes:
 #    post:
