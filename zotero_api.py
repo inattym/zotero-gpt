@@ -282,43 +282,51 @@ def collection_tree_preview():
         user_info = requests.get(f"{ZOTERO_BASE_URL}/keys/current", headers=headers).json()
         user_id = user_info["userID"]
 
-        all_collections = requests.get(f"{ZOTERO_BASE_URL}/users/{user_id}/collections", headers=headers).json()
-        groups = requests.get(f"{ZOTERO_BASE_URL}/users/{user_id}/groups", headers=headers).json()
+        # Helper to build tree from flat collection list
+        def build_tree(collections):
+            tree = {}
+            by_key = {c["data"]["key"]: c["data"] for c in collections}
+            children_map = {}
+            for c in collections:
+                parent = c["data"].get("parentCollection")
+                children_map.setdefault(parent, []).append(c["data"]["key"])
 
-        # Add group collections
+            def walk(key, level=0):
+                name = by_key[key]["name"]
+                indent = "  " * level
+                line = f"{indent}- {name}"
+                lines = [line]
+                for child_key in sorted(children_map.get(key, []), key=lambda k: by_key[k]["name"]):
+                    lines.extend(walk(child_key, level + 1))
+                return lines
+
+            # Get top-level keys (no parent)
+            top_keys = [k for k, v in by_key.items() if not v.get("parentCollection")]
+            output = []
+            for key in sorted(top_keys, key=lambda k: by_key[k]["name"]):
+                output.extend(walk(key))
+            return "\n".join(output)
+
+        # Personal collections
+        personal_raw = requests.get(f"{ZOTERO_BASE_URL}/users/{user_id}/collections", headers=headers).json()
+        personal_tree = build_tree(personal_raw)
+
+        # Group collections
+        group_trees = {}
+        groups = requests.get(f"{ZOTERO_BASE_URL}/users/{user_id}/groups", headers=headers).json()
         for group in groups:
             gid = group.get("id")
+            group_name = group.get("name", f"group_{gid}")
             try:
-                group_colls = requests.get(f"{ZOTERO_BASE_URL}/groups/{gid}/collections", headers=headers).json()
-                all_collections.extend(group_colls)
+                group_raw = requests.get(f"{ZOTERO_BASE_URL}/groups/{gid}/collections", headers=headers).json()
+                group_trees[group_name] = build_tree(group_raw)
             except Exception:
                 continue
 
-        # Build map: key => collection info
-        by_key = {c["data"]["key"]: c for c in all_collections}
-        children_map = {}
-        for c in all_collections:
-            parent = c["data"].get("parentCollection")
-            if parent:
-                children_map.setdefault(parent, []).append(c["data"]["key"])
-
-        def build_tree(key, level=0):
-            c = by_key.get(key)
-            if not c:
-                return None
-            name = c["data"]["name"]
-            indent = "  " * level
-            result = f"{indent}- {name}\n"
-            for child_key in children_map.get(key, []):
-                result += build_tree(child_key, level + 1) or ""
-            return result
-
-        roots = [c["data"]["key"] for c in all_collections if not c["data"].get("parentCollection")]
-        output = "Group Collections:\n"
-        for key in roots:
-            output += build_tree(key) or ""
-
-        return jsonify({"text": output.strip()})
+        return jsonify({
+            "personal_collections_tree": personal_tree,
+            "group_collections_tree": group_trees
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
