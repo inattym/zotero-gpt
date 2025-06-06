@@ -551,15 +551,27 @@ def summarize_collection():
                     fallback_titles.append(title)
 
                     # Check for child PDFs
-                    child_res = requests.get(
-                        f"{ZOTERO_BASE_URL}/{lib_path}/items/{key}/children",
-                        headers=headers
-                    )
-                    children = child_res.json()
+                    try:
+                        child_res = requests.get(
+                            f"{ZOTERO_BASE_URL}/{lib_path}/items/{key}/children",
+                            headers=headers,
+                            timeout=10
+                        )
+                        child_res.raise_for_status()
+                        children = child_res.json()
+                    except Exception as e:
+                        app.logger.error(f"[summarize_collection] Error fetching children for item {key}: {e}")
+                        continue
+
+    
                     for child in children:
                         cdata = child.get("data", {})
                         if cdata.get("itemType") == "attachment" and cdata.get("contentType") == "application/pdf":
-                            text = extract_pdf_text(api_key, user_id, child["key"], headers, lib_type, lib_id)
+                            try:
+                                text = extract_pdf_text(api_key, user_id, child["key"], headers, lib_type, lib_id)
+                            except Exception as e:
+                                app.logger.error(f"[summarize_collection] PDF extract failed for child {child['key']}: {e}")
+                                text = None
                             if text:
                                 pdf_summaries.append({
                                     "title": title,
@@ -567,7 +579,11 @@ def summarize_collection():
                                     "text": text
                                 })
                 elif data.get("contentType") == "application/pdf":
-                    text = extract_pdf_text(api_key, user_id, key, headers, lib_type, lib_id)
+                    try:
+                        text = extract_pdf_text(api_key, user_id, key, headers, lib_type, lib_id)
+                    except Exception as e:
+                        app.logger.error(f"[summarize_collection] PDF extract failed for item {key}: {e}")
+                        text = None
                     if text:
                         pdf_summaries.append({
                             "title": title,
