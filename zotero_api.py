@@ -279,63 +279,46 @@ def collection_tree_preview():
 
     try:
         headers = get_headers(api_key)
-        user_id = get_user_id(api_key)
+        user_info = requests.get(f"{ZOTERO_BASE_URL}/keys/current", headers=headers).json()
+        user_id = user_info["userID"]
 
-        # Fetch and flatten all collections
-        personal_raw = requests.get(f"{ZOTERO_BASE_URL}/users/{user_id}/collections", headers=headers).json()
-        personal_flat = []
-
-        def flatten_collections(collections, parent_id=None, prefix=""):
-            flat = []
-            for col in collections:
-                if col.get("parentCollection") == parent_id:
-                    full_name = f"{prefix}/{col['data']['name']}".strip("/")
-                    flat.append({
-                        "name": col["data"]["name"],
-                        "key": col["data"]["key"],
-                        "full_path": full_name,
-                        "parent_key": col["data"].get("parentCollection"),
-                        "library_type": "personal"
-                    })
-                    flat += flatten_collections(collections, col["data"]["key"], full_name)
-            return flat
-
-        personal_flat = flatten_collections(personal_raw)
-
-        group_flat = []
+        all_collections = requests.get(f"{ZOTERO_BASE_URL}/users/{user_id}/collections", headers=headers).json()
         groups = requests.get(f"{ZOTERO_BASE_URL}/users/{user_id}/groups", headers=headers).json()
+
+        # Add group collections
         for group in groups:
-            group_id = group.get("id")
-            group_name = group.get("name", f"group_{group_id}")
+            gid = group.get("id")
             try:
-                group_raw = requests.get(f"{ZOTERO_BASE_URL}/groups/{group_id}/collections", headers=headers).json()
-
-                def flatten_group(collections, parent_id=None, prefix=""):
-                    flat = []
-                    for col in collections:
-                        if col.get("parentCollection") == parent_id:
-                            full_name = f"{prefix}/{col['data']['name']}".strip("/")
-                            flat.append({
-                                "name": col["data"]["name"],
-                                "key": col["data"]["key"],
-                                "full_path": full_name,
-                                "parent_key": col["data"].get("parentCollection"),
-                                "library_type": group_name
-                            })
-                            flat += flatten_group(collections, col["data"]["key"], full_name)
-                    return flat
-
-                group_flat.extend(flatten_group(group_raw))
-            except:
+                group_colls = requests.get(f"{ZOTERO_BASE_URL}/groups/{gid}/collections", headers=headers).json()
+                all_collections.extend(group_colls)
+            except Exception:
                 continue
 
-        personal_tree = render_collection_tree(personal_flat)
-        group_tree = render_collection_tree(group_flat)
+        # Build map: key => collection info
+        by_key = {c["data"]["key"]: c for c in all_collections}
+        children_map = {}
+        for c in all_collections:
+            parent = c["data"].get("parentCollection")
+            if parent:
+                children_map.setdefault(parent, []).append(c["data"]["key"])
 
-        return jsonify({
-            "personal_collections_tree": personal_tree,
-            "group_collections_tree": group_tree
-        })
+        def build_tree(key, level=0):
+            c = by_key.get(key)
+            if not c:
+                return None
+            name = c["data"]["name"]
+            indent = "  " * level
+            result = f"{indent}- {name}\n"
+            for child_key in children_map.get(key, []):
+                result += build_tree(child_key, level + 1) or ""
+            return result
+
+        roots = [c["data"]["key"] for c in all_collections if not c["data"].get("parentCollection")]
+        output = "Group Collections:\n"
+        for key in roots:
+            output += build_tree(key) or ""
+
+        return jsonify({"text": output.strip()})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
