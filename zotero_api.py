@@ -183,6 +183,10 @@ def get_all_collections():
 
 
 
+
+
+
+
 @app.route("/items", methods=["GET"])
 def search_items():
     api_key = request.args.get("api_key")
@@ -205,7 +209,7 @@ def search_items():
         if q:
             search_params["q"] = q
 
-        # Resolve collection name or key
+        # Resolve collection
         if collection_name:
             if collection_name.startswith("collectionkey:"):
                 collection_key = collection_name.split(":", 1)[-1].strip()
@@ -215,7 +219,7 @@ def search_items():
                 if collection_keys:
                     search_params["collection"] = ",".join(collection_keys)
 
-        # First query
+        # Initial fetch
         item_res = requests.get(
             f"{ZOTERO_BASE_URL}/users/{user_id}/items",
             headers=headers,
@@ -223,48 +227,65 @@ def search_items():
         )
         items = item_res.json()
 
-        # If anything is returned, return now
         if items:
-            return jsonify(items)
+            return jsonify([
+                {
+                    "title": i["data"].get("title", "Untitled"),
+                    "key": i.get("key"),
+                    "type": i["data"].get("itemType"),
+                    "creators": [c.get("lastName", "") for c in i["data"].get("creators", [])],
+                    "abstract": i["data"].get("abstractNote", "")
+                }
+                for i in items
+            ])
 
-        # If nothing found and q exists, do a broader retry (ignoring collection)
+        # Retry without collection
         if q:
-            broader_params = {
-                "format": "json",
-                "limit": 100,
-                "q": q,
-                "qmode": "titleCreatorYear"
-            }
-
             broader_res = requests.get(
                 f"{ZOTERO_BASE_URL}/users/{user_id}/items",
                 headers=headers,
-                params=broader_params
+                params={"format": "json", "limit": 100, "q": q, "qmode": "titleCreatorYear"}
             )
             broader_items = broader_res.json()
 
-            # Fuzzy match across multiple fields
-            fuzzy_matches = fuzzy_match_multi_field(broader_items, q)
-            if fuzzy_matches:
-                return jsonify(fuzzy_matches)
+            fuzzy_hits = fuzzy_match_multi_field(broader_items, q)
+            if fuzzy_hits:
+                return jsonify([
+                    {
+                        "title": i["data"].get("title", "Untitled"),
+                        "key": i.get("key"),
+                        "type": i["data"].get("itemType"),
+                        "creators": [c.get("lastName", "") for c in i["data"].get("creators", [])],
+                        "abstract": i["data"].get("abstractNote", "")
+                    }
+                    for i in fuzzy_hits
+                ])
 
-            # Final fallback: split query and try word-by-word matching
+            # Final fallback: split query
             keywords = q.split()
             keyword_hits = []
             for word in keywords:
                 keyword_hits.extend(fuzzy_match_multi_field(broader_items, word))
 
-            # Deduplicate while preserving order
             seen = set()
             deduped = []
-            for item in keyword_hits:
-                key = item.get("key")
-                if key and key not in seen:
-                    seen.add(key)
-                    deduped.append(item)
+            for i in keyword_hits:
+                k = i.get("key")
+                if k and k not in seen:
+                    seen.add(k)
+                    deduped.append(i)
 
             if deduped:
-                return jsonify(deduped)
+                return jsonify([
+                    {
+                        "title": i["data"].get("title", "Untitled"),
+                        "key": i.get("key"),
+                        "type": i["data"].get("itemType"),
+                        "creators": [c.get("lastName", "") for c in i["data"].get("creators", [])],
+                        "abstract": i["data"].get("abstractNote", "")
+                    }
+                    for i in deduped
+                ])
 
             return jsonify({
                 "error": f"No items found for query '{q}'",
