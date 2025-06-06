@@ -243,8 +243,8 @@ def search_items():
 def get_notes():
     api_key = request.args.get("api_key")
     item_key = request.args.get("itemKey")
-    query = request.args.get("q", "")  # fuzzy input
-    collection_name = request.args.get("collection")
+    query = request.args.get("q", "").strip()
+    collection_name = request.args.get("collection", "").strip().lower()
 
     if not api_key:
         return jsonify({"error": "Missing Zotero API key"}), 400
@@ -253,28 +253,30 @@ def get_notes():
         user_id = get_user_id(api_key)
         headers = get_headers(api_key)
 
+        # Step 1: Resolve itemKey using fuzzy title if not provided
         if not item_key and query:
             search_params = {
                 "format": "json",
                 "q": query,
                 "qmode": "titleCreatorYear",
-                "limit": 5
+                "limit": 50
             }
 
+            # If a collection is provided, resolve its keys
             if collection_name:
                 collection_keys = get_collection_keys_by_name(api_key, user_id, collection_name, headers)
                 if collection_keys:
                     search_params["collection"] = ",".join(collection_keys)
 
-            item_res = requests.get(
+            search_res = requests.get(
                 f"{ZOTERO_BASE_URL}/users/{user_id}/items",
                 headers=headers,
                 params=search_params
             )
-            items = item_res.json()
+            items = search_res.json()
 
-            if not items:
-                # Broader fallback
+            # Fallback with broader query
+            if not items and query:
                 broader_res = requests.get(
                     f"{ZOTERO_BASE_URL}/users/{user_id}/items",
                     headers=headers,
@@ -282,18 +284,19 @@ def get_notes():
                 )
                 items = broader_res.json()
 
+            # Fuzzy match again
             if collection_name:
                 filtered = fuzzy_match_multi_field(items, collection_name)
                 if filtered:
                     item_key = filtered[0].get("key")
             else:
-                if not items and query:
-                    items = fuzzy_match_multi_field(items, query)
-                item_key = items[0].get("key") if items else None
+                fuzzy_filtered = fuzzy_match_multi_field(items, query)
+                if fuzzy_filtered:
+                    item_key = fuzzy_filtered[0].get("key")
 
             if not item_key and items:
                 return jsonify({
-                    "message": f"No exact match for query '{query}'",
+                    "message": f"No exact match for '{query}'",
                     "candidates": [
                         {"title": i["data"].get("title", "Untitled"), "key": i["key"]}
                         for i in items[:3]
@@ -301,8 +304,9 @@ def get_notes():
                 })
 
         if not item_key:
-            return jsonify({"error": "Missing itemKey or no match found from query"}), 404
+            return jsonify({"error": "Missing itemKey or failed to resolve query"}), 404
 
+        # Step 2: Fetch children notes of the resolved itemKey
         notes_res = requests.get(
             f"{ZOTERO_BASE_URL}/users/{user_id}/items/{item_key}/children",
             headers=headers,
@@ -313,6 +317,16 @@ def get_notes():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+
+
+
+
+
+
+
+
 
 @app.route("/read_pdf", methods=["GET"])
 def read_pdf():
