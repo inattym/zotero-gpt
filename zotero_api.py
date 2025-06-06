@@ -157,6 +157,10 @@ def get_all_collections():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+
+
+
 @app.route("/items", methods=["GET"])
 def search_items():
     api_key = request.args.get("api_key")
@@ -227,6 +231,12 @@ def search_items():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+
+
+
+
 
 
 @app.route("/notes", methods=["GET"])
