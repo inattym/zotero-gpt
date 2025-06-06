@@ -79,29 +79,52 @@ def fuzzy_match_multi_field(items, query, keys=["title", "abstractNote", "creato
 
 def get_collection_keys_by_name(api_key, user_id, name, headers):
     """
-    Returns a list of collection keys matching the name (including nested ones).
+    Returns a list of collection keys from both personal and group libraries matching the given name,
+    including their nested subcollections.
     """
-    res = requests.get(f"{ZOTERO_BASE_URL}/users/{user_id}/collections", headers=headers)
-    collections = res.json()
-    matched = fuzzy_match(collections, name, key="name")
-
-    if not matched:
-        return []
-
-    target_keys = {col["data"]["key"] for col in matched}
+    matched_keys = set()
     parent_to_children = {}
-    for col in collections:
+
+    # --- Personal Collections ---
+    personal = requests.get(f"{ZOTERO_BASE_URL}/users/{user_id}/collections", headers=headers).json()
+    for col in fuzzy_match(personal, name, key="name"):
+        matched_keys.add(col["data"]["key"])
+    for col in personal:
         parent = col["data"].get("parentCollection")
         if parent:
             parent_to_children.setdefault(parent, []).append(col["data"]["key"])
 
+    # --- Group Collections ---
+    groups = requests.get(f"{ZOTERO_BASE_URL}/users/{user_id}/groups", headers=headers).json()
+    for group in groups:
+        group_id = group.get("id")
+        try:
+            group_colls = requests.get(
+                f"{ZOTERO_BASE_URL}/groups/{group_id}/collections", headers=headers
+            ).json()
+            for col in fuzzy_match(group_colls, name, key="name"):
+                matched_keys.add(col["data"]["key"])
+            for col in group_colls:
+                parent = col["data"].get("parentCollection")
+                if parent:
+                    parent_to_children.setdefault(parent, []).append(col["data"]["key"])
+        except Exception:
+            continue  # skip failed groups
+
+    # --- Recursive Gathering of Nested Subcollections ---
     def gather_all_children(keys):
         result = set(keys)
         for k in keys:
             result.update(gather_all_children(parent_to_children.get(k, [])))
         return result
 
-    return list(gather_all_children(target_keys))
+    return list(gather_all_children(matched_keys))
+
+
+
+
+
+
 
 @app.route("/ping", methods=["GET"])
 def ping():
