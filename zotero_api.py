@@ -72,6 +72,11 @@ def fuzzy_match_multi_field(items, query, keys=["title", "abstractNote", "creato
 
     return matches
 
+
+
+
+
+
 def get_collection_keys_by_name(api_key, user_id, name, headers):
     """
     Returns a list of collection keys matching the name (including nested ones).
@@ -108,6 +113,11 @@ def ping():
         return jsonify({"status": "ok", "user_id": user_id})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+
+
+
 
 @app.route("/all_collections", methods=["GET"])
 def get_all_collections():
@@ -189,16 +199,15 @@ def search_items():
         search_params = {
             "format": "json",
             "qmode": "titleCreatorYear",
-            "limit": 100  # fetch more for fallback analysis
+            "limit": 100
         }
 
         if q:
             search_params["q"] = q
 
-        # If a collection is specified, resolve it (by name or key)
+        # Resolve collection name or key
         if collection_name:
             if collection_name.startswith("collectionkey:"):
-                # Direct Zotero collection key mode
                 collection_key = collection_name.split(":", 1)[-1].strip()
                 search_params["collection"] = collection_key
             else:
@@ -206,7 +215,7 @@ def search_items():
                 if collection_keys:
                     search_params["collection"] = ",".join(collection_keys)
 
-        # Primary query
+        # First query
         item_res = requests.get(
             f"{ZOTERO_BASE_URL}/users/{user_id}/items",
             headers=headers,
@@ -214,25 +223,48 @@ def search_items():
         )
         items = item_res.json()
 
+        # If anything is returned, return now
         if items:
             return jsonify(items)
 
-        # If nothing found, do a broader query with just `q` (ignoring collection)
-        if q and "collection" in search_params:
+        # If nothing found and q exists, do a broader retry (ignoring collection)
+        if q:
+            broader_params = {
+                "format": "json",
+                "limit": 100,
+                "q": q,
+                "qmode": "titleCreatorYear"
+            }
+
             broader_res = requests.get(
                 f"{ZOTERO_BASE_URL}/users/{user_id}/items",
                 headers=headers,
-                params={
-                    "format": "json",
-                    "q": q,
-                    "qmode": "titleCreatorYear",
-                    "limit": 100
-                }
+                params=broader_params
             )
             broader_items = broader_res.json()
-            filtered = fuzzy_match_multi_field(broader_items, q)
-            if filtered:
-                return jsonify(filtered)
+
+            # Fuzzy match across multiple fields
+            fuzzy_matches = fuzzy_match_multi_field(broader_items, q)
+            if fuzzy_matches:
+                return jsonify(fuzzy_matches)
+
+            # Final fallback: split query and try word-by-word matching
+            keywords = q.split()
+            keyword_hits = []
+            for word in keywords:
+                keyword_hits.extend(fuzzy_match_multi_field(broader_items, word))
+
+            # Deduplicate while preserving order
+            seen = set()
+            deduped = []
+            for item in keyword_hits:
+                key = item.get("key")
+                if key and key not in seen:
+                    seen.add(key)
+                    deduped.append(item)
+
+            if deduped:
+                return jsonify(deduped)
 
             return jsonify({
                 "error": f"No items found for query '{q}'",
@@ -243,6 +275,8 @@ def search_items():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
 
 
 
