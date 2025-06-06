@@ -5,6 +5,8 @@ import os
 from difflib import get_close_matches
 from flask_cors import CORS
 import tempfile
+import gc
+from flask import current_app as app  # for app.logger
 
 import logging
 logging.basicConfig(level=logging.DEBUG)
@@ -685,9 +687,6 @@ def get_all_nested_keys(api_key, user_id, headers):
 
 
 
-
-
-
 def extract_pdf_text(api_key, user_id, item_key, headers, lib_type="user", lib_id=None):
     """
     Download and extract text from a Zotero PDF attachment.
@@ -702,6 +701,7 @@ def extract_pdf_text(api_key, user_id, item_key, headers, lib_type="user", lib_i
         res = requests.get(file_url, headers=headers, stream=True)
 
         if res.status_code != 200:
+            app.logger.warning(f"[extract_pdf_text] File not found or inaccessible: {file_url}")
             return None
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
@@ -713,12 +713,17 @@ def extract_pdf_text(api_key, user_id, item_key, headers, lib_type="user", lib_i
         doc = fitz.open(tmp_path)
         text = "\n".join([p.get_text() for p in doc])
         doc.close()
+        os.remove(tmp_path)
+        gc.collect()
 
         return text.strip() if text.strip() else None
 
     except Exception as e:
-        print(f"[extract_pdf_text ERROR] {e}")
+        app.logger.error(f"[extract_pdf_text ERROR] {e}")
         return None
+
+
+
 
 
 
