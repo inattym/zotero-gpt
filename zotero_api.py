@@ -243,6 +243,111 @@ def get_all_collections():
 
 
 
+def render_collection_tree(collections):
+    from collections import defaultdict
+
+    # Organize collections by parent
+    tree = defaultdict(list)
+    for col in collections:
+        parent = col.get("parent_key") or None
+        tree[parent].append(col)
+
+    # Recursive builder
+    def walk(parent=None, indent=0):
+        lines = []
+        for col in sorted(tree.get(parent, []), key=lambda x: x["name"].lower()):
+            lines.append("  " * indent + f"- {col['name']}")
+            lines.extend(walk(col["key"], indent + 1))
+        return lines
+
+    return "\n".join(walk())
+
+
+
+
+
+
+
+
+
+
+@app.route("/collection_tree_preview", methods=["GET"])
+def collection_tree_preview():
+    api_key = request.args.get("api_key")
+    if not api_key:
+        return jsonify({"error": "Missing Zotero API key"}), 400
+
+    try:
+        headers = get_headers(api_key)
+        user_id = get_user_id(api_key)
+
+        # Fetch and flatten all collections
+        personal_raw = requests.get(f"{ZOTERO_BASE_URL}/users/{user_id}/collections", headers=headers).json()
+        personal_flat = []
+
+        def flatten_collections(collections, parent_id=None, prefix=""):
+            flat = []
+            for col in collections:
+                if col.get("parentCollection") == parent_id:
+                    full_name = f"{prefix}/{col['data']['name']}".strip("/")
+                    flat.append({
+                        "name": col["data"]["name"],
+                        "key": col["data"]["key"],
+                        "full_path": full_name,
+                        "parent_key": col["data"].get("parentCollection"),
+                        "library_type": "personal"
+                    })
+                    flat += flatten_collections(collections, col["data"]["key"], full_name)
+            return flat
+
+        personal_flat = flatten_collections(personal_raw)
+
+        group_flat = []
+        groups = requests.get(f"{ZOTERO_BASE_URL}/users/{user_id}/groups", headers=headers).json()
+        for group in groups:
+            group_id = group.get("id")
+            group_name = group.get("name", f"group_{group_id}")
+            try:
+                group_raw = requests.get(f"{ZOTERO_BASE_URL}/groups/{group_id}/collections", headers=headers).json()
+
+                def flatten_group(collections, parent_id=None, prefix=""):
+                    flat = []
+                    for col in collections:
+                        if col.get("parentCollection") == parent_id:
+                            full_name = f"{prefix}/{col['data']['name']}".strip("/")
+                            flat.append({
+                                "name": col["data"]["name"],
+                                "key": col["data"]["key"],
+                                "full_path": full_name,
+                                "parent_key": col["data"].get("parentCollection"),
+                                "library_type": group_name
+                            })
+                            flat += flatten_group(collections, col["data"]["key"], full_name)
+                    return flat
+
+                group_flat.extend(flatten_group(group_raw))
+            except:
+                continue
+
+        personal_tree = render_collection_tree(personal_flat)
+        group_tree = render_collection_tree(group_flat)
+
+        return jsonify({
+            "personal_collections_tree": personal_tree,
+            "group_collections_tree": group_tree
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
+
+
+
+
+
+
 
 @app.route("/items", methods=["GET"])
 def search_items():
