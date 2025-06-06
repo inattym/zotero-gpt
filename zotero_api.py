@@ -344,8 +344,8 @@ def get_notes():
 def read_pdf():
     api_key = request.args.get("api_key")
     item_key = request.args.get("itemKey")
-    title = request.args.get("title", "").strip()
-    collection_name = request.args.get("collection", "").strip().lower()
+    title = request.args.get("title")
+    collection_name = request.args.get("collection")
 
     if not api_key:
         return jsonify({"error": "Missing api_key"}), 400
@@ -354,13 +354,13 @@ def read_pdf():
         headers = get_headers(api_key)
         user_id = get_user_id(api_key)
 
-        # Step 1: Try to resolve itemKey from fuzzy title if not provided
+        # Step 1: If no itemKey, search by title
         if not item_key and title:
             search_params = {
                 "format": "json",
                 "q": title,
                 "qmode": "title",
-                "limit": 20
+                "limit": 5
             }
 
             if collection_name:
@@ -374,40 +374,49 @@ def read_pdf():
                 params=search_params
             )
             items = item_res.json()
-
-            # Fallback with broad query
-            if not items:
-                fallback_res = requests.get(
-                    f"{ZOTERO_BASE_URL}/users/{user_id}/items",
-                    headers=headers,
-                    params={"format": "json", "q": title, "limit": 100}
-                )
-                items = fallback_res.json()
-
-            if collection_name:
-                filtered = fuzzy_match_multi_field(items, collection_name)
-                if filtered:
-                    item_key = filtered[0].get("key")
+            if items:
+                item_key = items[0]["key"]
             else:
-                fuzzy_filtered = fuzzy_match_multi_field(items, title)
-                if fuzzy_filtered:
-                    item_key = fuzzy_filtered[0].get("key")
-
-            if not item_key and items:
-                return jsonify({
-                    "message": f"Multiple items matched '{title}', but no clear PDF selected.",
-                    "candidates": [
-                        {"title": i["data"].get("title", "Untitled"), "key": i["key"]}
-                        for i in items[:3]
-                    ]
-                })
+                return jsonify({"error": f"No item found for title '{title}'"}), 404
 
         if not item_key:
-            return jsonify({"error": "Missing itemKey or unable to resolve one from title"}), 404
+            return jsonify({"error": "Missing itemKey"}), 400
 
-        # Step 2: Download and read PDF file
+        # Step 2: Check if item is an attachment
+        item_res = requests.get(
+            f"{ZOTERO_BASE_URL}/users/{user_id}/items/{item_key}",
+            headers=headers
+        )
+
+        if item_res.status_code != 200:
+            return jsonify({"error": "Could not retrieve item metadata"}), item_res.status_code
+
+        item_data = item_res.json()
+        item_type = item_data["data"]["itemType"]
+        library = item_data["library"]
+        library_type = library["type"]
+        library_id = library["id"]
+
+        # Step 3: If item is not an attachment, try fetching children to find a PDF
+        if item_type != "attachment":
+            children_res = requests.get(
+                f"{ZOTERO_BASE_URL}/{library_type}s/{library_id}/items/{item_key}/children",
+                headers=headers
+            )
+            children = children_res.json()
+            pdf_attachments = [
+                c for c in children
+                if c["data"].get("itemType") == "attachment"
+                and c["data"].get("contentType") == "application/pdf"
+            ]
+            if not pdf_attachments:
+                return jsonify({"error": "No PDF attachment found for this item"}), 404
+
+            item_key = pdf_attachments[0]["key"]
+
+        # Step 4: Download the file
         file_res = requests.get(
-            f"{ZOTERO_BASE_URL}/users/{user_id}/items/{item_key}/file",
+            f"{ZOTERO_BASE_URL}/{library_type}s/{library_id}/items/{item_key}/file",
             headers=headers,
             stream=True
         )
@@ -415,18 +424,15 @@ def read_pdf():
         if file_res.status_code != 200:
             return jsonify({"error": "Could not download PDF file"}), file_res.status_code
 
-        temp_path = "temp.pdf"
-        with open(temp_path, "wb") as f:
+        with open("temp.pdf", "wb") as f:
             for chunk in file_res.iter_content(chunk_size=8192):
                 f.write(chunk)
 
-        # Step 3: Extract text from PDF using PyMuPDF
-        doc = fitz.open(temp_path)
+        doc = fitz.open("temp.pdf")
         text = "\n".join([page.get_text() for page in doc])
         doc.close()
-        os.remove(temp_path)
 
-        return jsonify({"text": text[:10000]})  # limit for safety
+        return jsonify({"text": text[:10000]})  # Trimmed for safety
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
