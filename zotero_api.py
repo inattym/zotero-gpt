@@ -409,7 +409,7 @@ def read_pdf():
         headers = get_headers(api_key)
         user_id = get_user_id(api_key)
 
-        # Step 1: Resolve itemKey from title if not given
+        # Step 1: Resolve itemKey from title if not provided
         if not item_key and title:
             search_params = {
                 "format": "json",
@@ -445,14 +445,20 @@ def read_pdf():
                 items = fuzzy_match_multi_field(items, title)
 
             if items:
-                item_key = items[0]["key"]
+                item_key = items[0].get("key")
             else:
-                return jsonify({"error": f"Could not resolve itemKey for title '{title}'"}), 404
+                return jsonify({
+                    "error": f"Could not resolve itemKey for title '{title}'",
+                    "candidates": [
+                        {"title": i["data"].get("title", "Untitled"), "key": i["key"]}
+                        for i in items[:3]
+                    ]
+                }), 404
 
         if not item_key:
             return jsonify({"error": "Missing itemKey"}), 400
 
-        # Step 2: Get metadata and library scope
+        # Step 2: Get metadata and determine library scope
         item_res = requests.get(
             f"{ZOTERO_BASE_URL}/users/{user_id}/items/{item_key}",
             headers=headers
@@ -467,30 +473,28 @@ def read_pdf():
         library_type = library["type"]
         library_id = library["id"]
 
-        # Step 3: If item isn't a PDF attachment, look for one among its children
+        # Step 3: If not an attachment, search children for PDF
         if item_type != "attachment":
             children_res = requests.get(
                 f"{ZOTERO_BASE_URL}/{library_type}s/{library_id}/items/{item_key}/children",
                 headers=headers
             )
             children = children_res.json()
-            pdf_attachments = [
+            pdfs = [
                 c for c in children
                 if c["data"].get("itemType") == "attachment" and
                    c["data"].get("contentType") == "application/pdf"
             ]
-            if not pdf_attachments:
+            if not pdfs:
                 return jsonify({"error": "No PDF attachment found for this item"}), 404
+            item_key = pdfs[0]["key"]
 
-            item_key = pdf_attachments[0]["key"]
-
-        # Step 4: Download and extract the PDF
+        # Step 4: Download and extract PDF
         file_res = requests.get(
             f"{ZOTERO_BASE_URL}/{library_type}s/{library_id}/items/{item_key}/file",
             headers=headers,
             stream=True
         )
-
         if file_res.status_code != 200:
             return jsonify({"error": "Could not download PDF file"}), file_res.status_code
 
@@ -507,7 +511,7 @@ def read_pdf():
 
         return jsonify({
             "title": title or item_key,
-            "text": text[:15000]  # trimmed for safety
+            "text": text[:15000]  # Trimmed for safety
         })
 
     except Exception as e:
