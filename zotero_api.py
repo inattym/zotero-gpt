@@ -162,6 +162,7 @@ def get_all_collections():
                         "name": col["data"]["name"],
                         "key": col["data"]["key"],
                         "full_path": full_name,
+                        "parent_key": col["data"].get("parentCollection"),
                         "library_type": "personal"
                     })
                     flat += flatten_collections(collections, col["data"]["key"], full_name)
@@ -187,7 +188,7 @@ def get_all_collections():
                     f"{ZOTERO_BASE_URL}/groups/{group_id}/collections", headers=headers
                 ).json()
 
-                def flatten_group(collections, parent_id=None, prefix=""):
+                def flatten_group(collections, parent_id=None, prefix="", group_name="unknown"):
                     flat = []
                     for col in collections:
                         if col.get("parentCollection") == parent_id:
@@ -196,12 +197,13 @@ def get_all_collections():
                                 "name": col["data"]["name"],
                                 "key": col["data"]["key"],
                                 "full_path": full_name,
+                                "parent_key": col["data"].get("parentCollection"),
                                 "library_type": group_name
                             })
-                            flat += flatten_group(collections, col["data"]["key"], full_name)
+                            flat += flatten_group(collections, col["data"]["key"], full_name, group_name)
                     return flat
 
-                group_flat = flatten_group(group_raw)
+                group_flat = flatten_group(group_raw, parent_id=None, prefix="", group_name=group_name)
                 group_collections.extend(group_flat)
 
             except Exception:
