@@ -2,8 +2,8 @@
   "schema_version": "v1",
   "name_for_human": "Zotero Assistant",
   "name_for_model": "zotero_plugin",
-  "description_for_human": "Query your Zotero library by topic, title, or collection.",
-  "description_for_model": "When the user references a collection name, retrieve all subcollections recursively and match based on title, even if nested.",
+  "description_for_human": "Query your Zotero library: by topic, title, or collection. Browse folders, notes, and PDFs.",
+  "description_for_model": "When the user references a collection name, retrieve all subcollections recursively and match items by title, notes, or PDF content. Summarize across nested folders using actual file data.",
   "auth": { "type": "none" },
   "api": {
     "type": "openapi",
