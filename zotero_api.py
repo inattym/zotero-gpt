@@ -472,25 +472,24 @@ def summarize_collection():
         user_id = get_user_id(api_key)
         headers = get_headers(api_key)
 
-        # Step 1: Resolve top-level matching collection(s)
+        # Step 1: Resolve top-level and nested collection keys
         root_keys = get_collection_keys_by_name(api_key, user_id, collection_name, headers)
         if not root_keys:
             return jsonify({"error": f"No matching collection found for '{collection_name}'"}), 404
 
-        # Step 2: Recursively gather all subcollection keys
         nested_map = get_all_nested_keys(api_key, user_id, headers)
         all_keys = set(root_keys)
         for k in root_keys:
             all_keys.update(nested_map.get(k, []))
 
-        # Step 3: Fetch all items across root + subcollections
+        # Step 2: Get items from Zotero in this collection and its subcollections
         item_res = requests.get(
             f"{ZOTERO_BASE_URL}/users/{user_id}/items",
             headers=headers,
             params={
                 "format": "json",
                 "collection": ",".join(all_keys),
-                "limit": 150
+                "limit": 200
             }
         )
         items = item_res.json()
@@ -508,10 +507,9 @@ def summarize_collection():
             creators = [c.get("lastName", "") for c in data.get("creators", [])]
 
             if item_type != "attachment":
-                # Always add to fallback
                 fallback_titles.append(title)
 
-                # Try to fetch child attachments (PDFs)
+                # ✅ Get ALL child PDFs
                 child_res = requests.get(
                     f"{ZOTERO_BASE_URL}/users/{user_id}/items/{key}/children",
                     headers=headers
@@ -528,9 +526,9 @@ def summarize_collection():
                                 "creators": creators,
                                 "text": text
                             })
-                        
+
             elif data.get("contentType") == "application/pdf":
-                # Standalone PDF item
+                # Standalone PDF
                 text = extract_pdf_text(api_key, user_id, key, headers)
                 if text:
                     pdf_summaries.append({
@@ -538,6 +536,7 @@ def summarize_collection():
                         "creators": creators,
                         "text": text
                     })
+
             else:
                 fallback_titles.append(title)
 
@@ -547,7 +546,6 @@ def summarize_collection():
                 "titles": fallback_titles
             })
 
-        # Basic theme aggregation
         themes = extract_themes([s["text"] for s in pdf_summaries])
         divergence = detect_divergence([s["text"] for s in pdf_summaries])
 
