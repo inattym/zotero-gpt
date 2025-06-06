@@ -499,8 +499,8 @@ def summarize_collection():
             key = ref["key"]
             lib_type = ref["library_type"]
             lib_id = ref["library_id"]
-            grouped_keys[(lib_type, lib_id)].add(key)
-            grouped_keys[(lib_type, lib_id)].update(nested_map.get(key, []))
+            grouped_keys[(lib_type, lib_id)].add(str(key))
+            grouped_keys[(lib_type, lib_id)].update(map(str, nested_map.get(key, [])))
 
         pdf_summaries = []
         fallback_titles = []
