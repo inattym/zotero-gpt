@@ -79,39 +79,55 @@ def fuzzy_match_multi_field(items, query, keys=["title", "abstractNote", "creato
 
 def get_collection_keys_by_name(api_key, user_id, name, headers):
     """
-    Returns a list of collection keys from both personal and group libraries matching the given name,
-    including their nested subcollections.
+    Return all matching collection keys (including nested ones) by fuzzy matching on full_path.
     """
-    matched_keys = set()
-    parent_to_children = {}
+    all_collections = []
 
-    # --- Personal Collections ---
+    # Personal
     personal = requests.get(f"{ZOTERO_BASE_URL}/users/{user_id}/collections", headers=headers).json()
-    for col in fuzzy_match(personal, name, key="name"):
-        matched_keys.add(col["data"]["key"])
     for col in personal:
-        parent = col["data"].get("parentCollection")
-        if parent:
-            parent_to_children.setdefault(parent, []).append(col["data"]["key"])
+        col["library_type"] = "personal"
+    all_collections.extend(personal)
 
-    # --- Group Collections ---
+    # Groups
     groups = requests.get(f"{ZOTERO_BASE_URL}/users/{user_id}/groups", headers=headers).json()
     for group in groups:
-        group_id = group.get("id")
+        gid = group.get("id")
         try:
             group_colls = requests.get(
-                f"{ZOTERO_BASE_URL}/groups/{group_id}/collections", headers=headers
+                f"{ZOTERO_BASE_URL}/groups/{gid}/collections", headers=headers
             ).json()
-            for col in fuzzy_match(group_colls, name, key="name"):
-                matched_keys.add(col["data"]["key"])
             for col in group_colls:
-                parent = col["data"].get("parentCollection")
-                if parent:
-                    parent_to_children.setdefault(parent, []).append(col["data"]["key"])
+                col["library_type"] = f"group_{gid}"
+            all_collections.extend(group_colls)
         except Exception:
-            continue  # skip failed groups
+            continue
 
-    # --- Recursive Gathering of Nested Subcollections ---
+    # Build full paths
+    id_to_collection = {c["data"]["key"]: c for c in all_collections}
+    def build_full_path(col):
+        parts = [col["data"]["name"]]
+        parent = col["data"].get("parentCollection")
+        while parent and parent in id_to_collection:
+            parent_col = id_to_collection[parent]
+            parts.insert(0, parent_col["data"]["name"])
+            parent = parent_col["data"].get("parentCollection")
+        return "/".join(parts)
+
+    full_paths = {build_full_path(c).lower(): c for c in all_collections}
+    matches = get_close_matches(name.lower(), full_paths.keys(), n=3, cutoff=0.4)
+    if not matches:
+        return []
+
+    matched_keys = {full_paths[m]["data"]["key"] for m in matches}
+
+    # Build parent-child map
+    parent_to_children = {}
+    for c in all_collections:
+        parent = c["data"].get("parentCollection")
+        if parent:
+            parent_to_children.setdefault(parent, []).append(c["data"]["key"])
+
     def gather_all_children(keys):
         result = set(keys)
         for k in keys:
@@ -119,6 +135,10 @@ def get_collection_keys_by_name(api_key, user_id, name, headers):
         return result
 
     return list(gather_all_children(matched_keys))
+
+
+
+
 
 
 
