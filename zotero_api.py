@@ -3,6 +3,12 @@ import requests
 import fitz  # PyMuPDF
 import os
 from difflib import get_close_matches
+from flask_cors import CORS
+
+
+
+
+
 
 app = Flask(__name__)
 ZOTERO_BASE_URL = "https://api.zotero.org"
