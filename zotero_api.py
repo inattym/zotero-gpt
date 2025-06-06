@@ -4,6 +4,8 @@ import fitz  # PyMuPDF
 import os
 from difflib import get_close_matches
 from flask_cors import CORS
+import tempfile
+
 
 
 
@@ -649,24 +651,42 @@ def get_all_nested_keys(api_key, user_id, headers):
 
 
 
-def extract_pdf_text(api_key, user_id, item_key, headers):
+def extract_pdf_text(api_key, user_id, item_key, headers, lib_type="user", lib_id=None):
+    """
+    Download and extract text from a Zotero PDF attachment.
+    Supports both user and group libraries. Uses fitz for PDF parsing.
+    """
     try:
-        res = requests.get(
-            f"{ZOTERO_BASE_URL}/users/{user_id}/items/{item_key}/file",
-            headers=headers,
-            stream=True
-        )
+        if lib_type == "user":
+            lib_id = user_id
+        lib_path = f"{lib_type}s/{lib_id}"
+
+        file_url = f"{ZOTERO_BASE_URL}/{lib_path}/items/{item_key}/file"
+        res = requests.get(file_url, headers=headers, stream=True)
+
         if res.status_code != 200:
             return None
-        with open("temp_summary.pdf", "wb") as f:
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             for chunk in res.iter_content(chunk_size=8192):
-                f.write(chunk)
-        doc = fitz.open("temp_summary.pdf")
+                if chunk:
+                    tmp.write(chunk)
+            tmp_path = tmp.name
+
+        doc = fitz.open(tmp_path)
         text = "\n".join([p.get_text() for p in doc])
         doc.close()
-        return text if text.strip() else None
-    except:
+
+        return text.strip() if text.strip() else None
+
+    except Exception as e:
+        print(f"[extract_pdf_text ERROR] {e}")
         return None
+
+
+
+
+
 
 
 def extract_themes(texts):
