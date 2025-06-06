@@ -317,6 +317,145 @@ def search_items():
 
 
 
+@app.route("/summarize_collection", methods=["GET"])
+def summarize_collection():
+    api_key = request.args.get("api_key")
+    collection_name = request.args.get("collection", "").strip().lower()
+
+    if not api_key:
+        return jsonify({"error": "Missing Zotero API key"}), 400
+    if not collection_name:
+        return jsonify({"error": "Missing collection name"}), 400
+
+    try:
+        user_id = get_user_id(api_key)
+        headers = get_headers(api_key)
+        
+        # Resolve collection key(s)
+        collection_keys = get_collection_keys_by_name(api_key, user_id, collection_name, headers)
+        if not collection_keys:
+            return jsonify({"error": f"No matching collection found for '{collection_name}'"}), 404
+
+        # Fetch all items in the collection
+        item_res = requests.get(
+            f"{ZOTERO_BASE_URL}/users/{user_id}/items",
+            headers=headers,
+            params={
+                "format": "json",
+                "collection": ",".join(collection_keys),
+                "limit": 100
+            }
+        )
+        items = item_res.json()
+        if not items:
+            return jsonify({"error": "No items found in collection"}), 404
+
+        pdf_summaries = []
+        fallback_titles = []
+
+        for item in items:
+            data = item.get("data", {})
+            key = item.get("key")
+            title = data.get("title", "Untitled")
+            item_type = data.get("itemType")
+            creators = [c.get("lastName", "") for c in data.get("creators", [])]
+
+            # Skip unless it's a parent item or attachment with PDF
+            if item_type != "attachment":
+                # Try to fetch children for PDF
+                child_res = requests.get(
+                    f"{ZOTERO_BASE_URL}/users/{user_id}/items/{key}/children",
+                    headers=headers
+                )
+                children = child_res.json()
+                for child in children:
+                    if child["data"].get("itemType") == "attachment" and \
+                       child["data"].get("contentType") == "application/pdf":
+                        # Extract and summarize PDF
+                        text = extract_pdf_text(api_key, user_id, child["key"], headers)
+                        if text:
+                            pdf_summaries.append({"title": title, "creators": creators, "text": text})
+                        break
+            elif data.get("contentType") == "application/pdf":
+                text = extract_pdf_text(api_key, user_id, key, headers)
+                if text:
+                    pdf_summaries.append({"title": title, "creators": creators, "text": text})
+            else:
+                fallback_titles.append(title)
+
+        if not pdf_summaries:
+            return jsonify({
+                "note": "No readable PDFs found. Showing fallback titles only.",
+                "titles": fallback_titles
+            })
+
+        # Basic thematic aggregation
+        themes = extract_themes([s["text"] for s in pdf_summaries])
+        divergence = detect_divergence([s["text"] for s in pdf_summaries])
+
+        return jsonify({
+            "collection": collection_name,
+            "pdfs_read": len(pdf_summaries),
+            "themes": themes,
+            "divergent": divergence,
+            "docs": [{"title": s["title"], "creators": s["creators"]} for s in pdf_summaries]
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def extract_pdf_text(api_key, user_id, item_key, headers):
+    try:
+        res = requests.get(
+            f"{ZOTERO_BASE_URL}/users/{user_id}/items/{item_key}/file",
+            headers=headers,
+            stream=True
+        )
+        if res.status_code != 200:
+            return None
+        with open("temp_summary.pdf", "wb") as f:
+            for chunk in res.iter_content(chunk_size=8192):
+                f.write(chunk)
+        doc = fitz.open("temp_summary.pdf")
+        text = "\n".join([p.get_text() for p in doc])
+        doc.close()
+        return text if text.strip() else None
+    except:
+        return None
+
+
+def extract_themes(texts):
+    keywords = ["equity", "lab", "sensemaking", "argument", "TA", "instruction", "framework"]
+    found = set()
+    for t in texts:
+        for k in keywords:
+            if k in t.lower():
+                found.add(k)
+    return list(found)
+
+
+def detect_divergence(texts):
+    # Dummy check: find outliers by word count
+    if len(texts) < 2:
+        return []
+    lengths = [len(t.split()) for t in texts]
+    avg = sum(lengths) / len(lengths)
+    outliers = []
+    for i, l in enumerate(lengths):
+        if abs(l - avg) > 0.5 * avg:
+            outliers.append(f"Doc {i+1} is unusually {'long' if l > avg else 'short'}")
+    return outliers
+
+
+
+
+
+
+
+
+
+
 
 @app.route("/notes", methods=["GET"])
 def get_notes():
