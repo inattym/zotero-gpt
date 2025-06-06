@@ -134,7 +134,17 @@ def get_collection_keys_by_name(api_key, user_id, name, headers):
             result.update(gather_all_children(parent_to_children.get(k, [])))
         return result
 
-    return list(gather_all_children(matched_keys))
+    result = []
+    for key in gather_all_children(matched_keys):
+        col = id_to_collection.get(key)
+        if col:
+            lib_type = col["library_type"]
+            if lib_type == "personal":
+                result.append({"key": key, "library_type": "user", "library_id": user_id})
+            elif lib_type.startswith("group_"):
+                gid = int(lib_type.split("_")[1])
+                result.append({"key": key, "library_type": "group", "library_id": gid})
+    return result
 
 
 
@@ -472,73 +482,77 @@ def summarize_collection():
         user_id = get_user_id(api_key)
         headers = get_headers(api_key)
 
-        # Step 1: Resolve top-level and nested collection keys
-        root_keys = get_collection_keys_by_name(api_key, user_id, collection_name, headers)
-        if not root_keys:
+        # Step 1: Get all matching collection references with library metadata
+        collection_refs = get_collection_keys_by_name(api_key, user_id, collection_name, headers)
+        if not collection_refs:
             return jsonify({"error": f"No matching collection found for '{collection_name}'"}), 404
 
+        # Step 2: Load nested collections once
         nested_map = get_all_nested_keys(api_key, user_id, headers)
-        all_keys = set(root_keys)
-        for k in root_keys:
-            all_keys.update(nested_map.get(k, []))
 
-        # Step 2: Get items from Zotero in this collection and its subcollections
-        item_res = requests.get(
-            f"{ZOTERO_BASE_URL}/users/{user_id}/items",
-            headers=headers,
-            params={
-                "format": "json",
-                "collection": ",".join(all_keys),
-                "limit": 200
-            }
-        )
-        items = item_res.json()
-        if not items:
-            return jsonify({"error": "No items found in collection"}), 404
+        # Step 3: Group collections by (library_type, library_id)
+        from collections import defaultdict
+        grouped_keys = defaultdict(set)
+        for ref in collection_refs:
+            key = ref["key"]
+            lib_type = ref["library_type"]
+            lib_id = ref["library_id"]
+            grouped_keys[(lib_type, lib_id)].add(key)
+            grouped_keys[(lib_type, lib_id)].update(nested_map.get(key, []))
 
         pdf_summaries = []
         fallback_titles = []
 
-        for item in items:
-            data = item.get("data", {})
-            key = item.get("key")
-            title = data.get("title", "Untitled")
-            item_type = data.get("itemType")
-            creators = [c.get("lastName", "") for c in data.get("creators", [])]
+        # Step 4: Loop through each library
+        for (lib_type, lib_id), keys in grouped_keys.items():
+            lib_path = f"{lib_type}s/{lib_id}"
+            item_res = requests.get(
+                f"{ZOTERO_BASE_URL}/{lib_path}/items",
+                headers=headers,
+                params={
+                    "format": "json",
+                    "collection": ",".join(keys),
+                    "limit": 200
+                }
+            )
+            items = item_res.json()
 
-            if item_type != "attachment":
-                fallback_titles.append(title)
+            for item in items:
+                data = item.get("data", {})
+                key = item.get("key")
+                title = data.get("title", "Untitled")
+                item_type = data.get("itemType")
+                creators = [c.get("lastName", "") for c in data.get("creators", [])]
 
-                # ✅ Get ALL child PDFs
-                child_res = requests.get(
-                    f"{ZOTERO_BASE_URL}/users/{user_id}/items/{key}/children",
-                    headers=headers
-                )
-                children = child_res.json()
-                for child in children:
-                    child_data = child.get("data", {})
-                    if child_data.get("itemType") == "attachment" and \
-                       child_data.get("contentType") == "application/pdf":
-                        text = extract_pdf_text(api_key, user_id, child["key"], headers)
-                        if text:
-                            pdf_summaries.append({
-                                "title": title,
-                                "creators": creators,
-                                "text": text
-                            })
+                if item_type != "attachment":
+                    fallback_titles.append(title)
 
-            elif data.get("contentType") == "application/pdf":
-                # Standalone PDF
-                text = extract_pdf_text(api_key, user_id, key, headers)
-                if text:
-                    pdf_summaries.append({
-                        "title": title,
-                        "creators": creators,
-                        "text": text
-                    })
-
-            else:
-                fallback_titles.append(title)
+                    # Check for child PDFs
+                    child_res = requests.get(
+                        f"{ZOTERO_BASE_URL}/{lib_path}/items/{key}/children",
+                        headers=headers
+                    )
+                    children = child_res.json()
+                    for child in children:
+                        cdata = child.get("data", {})
+                        if cdata.get("itemType") == "attachment" and cdata.get("contentType") == "application/pdf":
+                            text = extract_pdf_text(api_key, user_id, child["key"], headers, lib_type, lib_id)
+                            if text:
+                                pdf_summaries.append({
+                                    "title": title,
+                                    "creators": creators,
+                                    "text": text
+                                })
+                elif data.get("contentType") == "application/pdf":
+                    text = extract_pdf_text(api_key, user_id, key, headers, lib_type, lib_id)
+                    if text:
+                        pdf_summaries.append({
+                            "title": title,
+                            "creators": creators,
+                            "text": text
+                        })
+                else:
+                    fallback_titles.append(title)
 
         if not pdf_summaries:
             return jsonify({
@@ -569,15 +583,47 @@ def summarize_collection():
 
 
 def get_all_nested_keys(api_key, user_id, headers):
-    res = requests.get(f"{ZOTERO_BASE_URL}/users/{user_id}/collections", headers=headers)
-    all_collections = res.json()
+    """
+    Return a mapping of collection keys to their nested subcollection keys,
+    across both personal and group libraries.
+    """
+    all_collections = []
 
+    # Fetch personal collections
+    personal = requests.get(
+        f"{ZOTERO_BASE_URL}/users/{user_id}/collections", headers=headers
+    ).json()
+    for col in personal:
+        col["library_type"] = "user"
+        col["library_id"] = user_id
+    all_collections.extend(personal)
+
+    # Fetch group collections
+    groups = requests.get(
+        f"{ZOTERO_BASE_URL}/users/{user_id}/groups", headers=headers
+    ).json()
+
+    for group in groups:
+        gid = group.get("id")
+        try:
+            group_colls = requests.get(
+                f"{ZOTERO_BASE_URL}/groups/{gid}/collections", headers=headers
+            ).json()
+            for col in group_colls:
+                col["library_type"] = "group"
+                col["library_id"] = gid
+            all_collections.extend(group_colls)
+        except Exception:
+            continue
+
+    # Build parent-child map
     parent_map = {}
     for c in all_collections:
         parent = c["data"].get("parentCollection")
         if parent:
             parent_map.setdefault(parent, []).append(c["data"]["key"])
 
+    # Recursive gatherer
     def gather(k):
         out = set()
         children = parent_map.get(k, [])
