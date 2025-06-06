@@ -173,9 +173,11 @@ paths:
 
   /collection_tree_preview:
     get:
+      operationId: previewCollectionTree
       summary: Get formatted hierarchical preview of all Zotero collections
       description: |
-        Returns a plain-text indented tree of all collections and subcollections, including group and personal libraries. Useful for visualizing nested folder structures.
+        Returns a plain-text indented tree of all collections and subcollections, including group and personal libraries.
+        Useful for visualizing nested folder structures.
       parameters:
         - name: api_key
           in: query
@@ -184,7 +186,7 @@ paths:
             type: string
           description: Zotero API key
       responses:
-        '200':
+        "200":
           description: Tree-formatted text of collections
           content:
             application/json:
@@ -193,9 +195,9 @@ paths:
                 properties:
                   text:
                     type: string
-        '400':
+        "400":
           description: Missing API key
-        '500':
+        "500":
           description: Server error or Zotero API failure
 
     
