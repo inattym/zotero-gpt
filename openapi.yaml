@@ -1,0 +1,114 @@
+openapi: "3.1.0"
+info:
+  title: Zotero API Plugin
+  description: >
+    A plugin to interact with any user's Zotero library using their own API key.
+    The plugin retrieves everything the user can see: personal libraries, group/shared collections,
+    items, notes, and PDF content. Use the /all_collections endpoint by default when asking
+    "What’s in my library?" or similar.
+  version: "1.0.0"
+
+servers:
+  - url: https://zotero-api.onrender.com
+
+paths:
+  /ping:
+    get:
+      operationId: pingServer
+      summary: Ping the server and get user ID from Zotero
+      parameters:
+        - name: api_key
+          in: query
+          description: Zotero API key of the user
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Successful ping
+
+  /all_collections:
+    get:
+      operationId: getAllCollections
+      summary: List all user collections from both personal and group libraries (default view)
+      description: |
+        This is the default endpoint to retrieve everything the user has access to in Zotero—
+        including personal collections and all shared group libraries.
+        Use this endpoint to answer broad questions like “What’s in my library?”,
+        “Show my collections”, or “What group libraries do I have access to?”
+      parameters:
+        - name: api_key
+          in: query
+          description: Zotero API key of the user
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Combined list of personal and group collections
+
+  /items:
+    get:
+      operationId: searchItems
+      summary: Search for items by keyword
+      description: Searches all items in the user's personal and group Zotero collections.
+      parameters:
+        - name: api_key
+          in: query
+          description: Zotero API key of the user
+          required: true
+          schema:
+            type: string
+        - name: q
+          in: query
+          description: Search query string
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: A list of Zotero items matching the query
+
+  /notes:
+    get:
+      operationId: getNotes
+      summary: Get notes for the specified Zotero item
+      description: Retrieves notes attached to a specific Zotero item.
+      parameters:
+        - name: api_key
+          in: query
+          description: Zotero API key of the user
+          required: true
+          schema:
+            type: string
+        - name: itemKey
+          in: query
+          description: The Zotero item key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Notes for the specified Zotero item
+
+  /read_pdf:
+    get:
+      operationId: readPdf
+      summary: Extract text from a PDF stored in Zotero
+      description: Downloads and extracts text from a PDF file attached to a Zotero item.
+      parameters:
+        - name: api_key
+          in: query
+          description: Zotero API key of the user
+          required: true
+          schema:
+            type: string
+        - name: itemKey
+          in: query
+          description: The Zotero item key for the PDF file
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Extracted text content from the PDF

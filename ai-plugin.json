@@ -1,0 +1,16 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "Zotero Assistant",
+  "name_for_model": "zotero_plugin",
+  "description_for_human": "Query your Zotero library by topic, title, or collection.",
+  "description_for_model": "When the user references a collection name, retrieve all subcollections recursively and match based on title, even if nested.",
+  "auth": { "type": "none" },
+  "api": {
+    "type": "openapi",
+    "url": "https://zotero-api.onrender.com/openapi.yaml",
+    "is_user_authenticated": true
+  },
+  "logo_url": "https://zotero-api.onrender.com/logo.png",
+  "contact_email": "support@yourdomain.com",
+  "legal_info_url": "https://zotero-api.onrender.com/privacy"
+}
