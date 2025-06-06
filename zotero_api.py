@@ -11,7 +11,13 @@ from flask_cors import CORS
 
 
 app = Flask(__name__)
+CORS(app)
 ZOTERO_BASE_URL = "https://api.zotero.org"
+
+
+
+
+
 
 # Helper to build auth headers
 def get_headers(api_key):
