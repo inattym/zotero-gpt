@@ -378,8 +378,8 @@ def get_notes():
 def read_pdf():
     api_key = request.args.get("api_key")
     item_key = request.args.get("itemKey")
-    title = request.args.get("title")
-    collection_name = request.args.get("collection")
+    title = request.args.get("title", "").strip()
+    collection_name = request.args.get("collection", "").strip().lower()
 
     if not api_key:
         return jsonify({"error": "Missing api_key"}), 400
@@ -388,7 +388,7 @@ def read_pdf():
         headers = get_headers(api_key)
         user_id = get_user_id(api_key)
 
-        # Step 1: If no itemKey, search by title
+        # Step 1: Resolve itemKey from title if not given
         if not item_key and title:
             search_params = {
                 "format": "json",
@@ -397,10 +397,14 @@ def read_pdf():
                 "limit": 5
             }
 
+            # Resolve collection key(s)
             if collection_name:
-                collection_keys = get_collection_keys_by_name(api_key, user_id, collection_name, headers)
-                if collection_keys:
-                    search_params["collection"] = ",".join(collection_keys)
+                if collection_name.startswith("collectionkey:"):
+                    search_params["collection"] = collection_name.split(":", 1)[-1].strip()
+                else:
+                    collection_keys = get_collection_keys_by_name(api_key, user_id, collection_name, headers)
+                    if collection_keys:
+                        search_params["collection"] = ",".join(collection_keys)
 
             item_res = requests.get(
                 f"{ZOTERO_BASE_URL}/users/{user_id}/items",
@@ -408,15 +412,26 @@ def read_pdf():
                 params=search_params
             )
             items = item_res.json()
+
+            if not items:
+                # Try broader match
+                fallback_res = requests.get(
+                    f"{ZOTERO_BASE_URL}/users/{user_id}/items",
+                    headers=headers,
+                    params={"format": "json", "q": title, "limit": 25}
+                )
+                items = fallback_res.json()
+                items = fuzzy_match_multi_field(items, title)
+
             if items:
                 item_key = items[0]["key"]
             else:
-                return jsonify({"error": f"No item found for title '{title}'"}), 404
+                return jsonify({"error": f"Could not resolve itemKey for title '{title}'"}), 404
 
         if not item_key:
             return jsonify({"error": "Missing itemKey"}), 400
 
-        # Step 2: Check if item is an attachment
+        # Step 2: Get metadata and library scope
         item_res = requests.get(
             f"{ZOTERO_BASE_URL}/users/{user_id}/items/{item_key}",
             headers=headers
@@ -431,7 +446,7 @@ def read_pdf():
         library_type = library["type"]
         library_id = library["id"]
 
-        # Step 3: If item is not an attachment, try fetching children to find a PDF
+        # Step 3: If item isn't a PDF attachment, look for one among its children
         if item_type != "attachment":
             children_res = requests.get(
                 f"{ZOTERO_BASE_URL}/{library_type}s/{library_id}/items/{item_key}/children",
@@ -440,15 +455,15 @@ def read_pdf():
             children = children_res.json()
             pdf_attachments = [
                 c for c in children
-                if c["data"].get("itemType") == "attachment"
-                and c["data"].get("contentType") == "application/pdf"
+                if c["data"].get("itemType") == "attachment" and
+                   c["data"].get("contentType") == "application/pdf"
             ]
             if not pdf_attachments:
                 return jsonify({"error": "No PDF attachment found for this item"}), 404
 
             item_key = pdf_attachments[0]["key"]
 
-        # Step 4: Download the file
+        # Step 4: Download and extract the PDF
         file_res = requests.get(
             f"{ZOTERO_BASE_URL}/{library_type}s/{library_id}/items/{item_key}/file",
             headers=headers,
@@ -466,7 +481,13 @@ def read_pdf():
         text = "\n".join([page.get_text() for page in doc])
         doc.close()
 
-        return jsonify({"text": text[:10000]})  # Trimmed for safety
+        if not text.strip():
+            return jsonify({"error": "PDF extracted but contains no readable text."}), 204
+
+        return jsonify({
+            "title": title or item_key,
+            "text": text[:15000]  # trimmed for safety
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -493,3 +514,15 @@ def serve_privacy():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
+
+
+
+
+
+
+
+
+
+
+
+
