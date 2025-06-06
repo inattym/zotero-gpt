@@ -500,23 +500,36 @@ def summarize_collection():
             creators = [c.get("lastName", "") for c in data.get("creators", [])]
 
             if item_type != "attachment":
-                # Fetch child attachments
+                # Always add to fallback
+                fallback_titles.append(title)
+
+                # Try to fetch child attachments (PDFs)
                 child_res = requests.get(
                     f"{ZOTERO_BASE_URL}/users/{user_id}/items/{key}/children",
                     headers=headers
                 )
                 children = child_res.json()
                 for child in children:
-                    if child["data"].get("itemType") == "attachment" and \
-                       child["data"].get("contentType") == "application/pdf":
+                    child_data = child.get("data", {})
+                    if child_data.get("itemType") == "attachment" and \
+                       child_data.get("contentType") == "application/pdf":
                         text = extract_pdf_text(api_key, user_id, child["key"], headers)
                         if text:
-                            pdf_summaries.append({"title": title, "creators": creators, "text": text})
+                            pdf_summaries.append({
+                                "title": title,
+                                "creators": creators,
+                                "text": text
+                            })
                         break
             elif data.get("contentType") == "application/pdf":
+                # Standalone PDF item
                 text = extract_pdf_text(api_key, user_id, key, headers)
                 if text:
-                    pdf_summaries.append({"title": title, "creators": creators, "text": text})
+                    pdf_summaries.append({
+                        "title": title,
+                        "creators": creators,
+                        "text": text
+                    })
             else:
                 fallback_titles.append(title)
 
