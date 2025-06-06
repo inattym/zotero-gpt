@@ -172,17 +172,25 @@ def search_items():
 
         search_params = {
             "format": "json",
-            "q": q,
             "qmode": "titleCreatorYear",
-            "limit": 20
+            "limit": 100  # fetch more for fallback analysis
         }
 
-        # Resolve collection name if provided
-        if collection_name:
-            collection_keys = get_collection_keys_by_name(api_key, user_id, collection_name, headers)
-            if collection_keys:
-                search_params["collection"] = ",".join(collection_keys)
+        if q:
+            search_params["q"] = q
 
+        # If a collection is specified, resolve it (by name or key)
+        if collection_name:
+            if collection_name.startswith("collectionkey:"):
+                # Direct Zotero collection key mode
+                collection_key = collection_name.split(":", 1)[-1].strip()
+                search_params["collection"] = collection_key
+            else:
+                collection_keys = get_collection_keys_by_name(api_key, user_id, collection_name, headers)
+                if collection_keys:
+                    search_params["collection"] = ",".join(collection_keys)
+
+        # Primary query
         item_res = requests.get(
             f"{ZOTERO_BASE_URL}/users/{user_id}/items",
             headers=headers,
@@ -190,45 +198,36 @@ def search_items():
         )
         items = item_res.json()
 
-        if collection_name:
-            filtered = fuzzy_match_multi_field(items, collection_name)
-            if not filtered:
-                return jsonify({
-                    "message": f"No items matched both query '{q}' and collection '{collection_name}'.",
-                    "candidates": [
-                        {"title": i["data"].get("title", "Untitled"), "key": i["key"]}
-                        for i in items[:3]
-                    ]
-                }), 404
-            items = filtered
+        if items:
+            return jsonify(items)
 
-        # Improved fallback: broader re-fetch if empty
-        if not items and q:
-            broader_params = {
-                "format": "json",
-                "q": q,
-                "qmode": "titleCreatorYear",
-                "limit": 100
-            }
+        # If nothing found, do a broader query with just `q` (ignoring collection)
+        if q and "collection" in search_params:
             broader_res = requests.get(
                 f"{ZOTERO_BASE_URL}/users/{user_id}/items",
                 headers=headers,
-                params=broader_params
+                params={
+                    "format": "json",
+                    "q": q,
+                    "qmode": "titleCreatorYear",
+                    "limit": 100
+                }
             )
             broader_items = broader_res.json()
-            fallback_filtered = fuzzy_match_multi_field(broader_items, q)
-            if fallback_filtered:
-                items = fallback_filtered
-            else:
-                return jsonify({
-                    "error": f"No items found for query '{q}'",
-                    "suggestions": suggest_alternatives(broader_items, q)
-                }), 404
+            filtered = fuzzy_match_multi_field(broader_items, q)
+            if filtered:
+                return jsonify(filtered)
 
-        return jsonify(items)
+            return jsonify({
+                "error": f"No items found for query '{q}'",
+                "suggestions": suggest_alternatives(broader_items, q)
+            }), 404
+
+        return jsonify({"error": "No items found"}), 404
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/notes", methods=["GET"])
 def get_notes():
