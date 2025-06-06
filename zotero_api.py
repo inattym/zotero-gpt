@@ -380,7 +380,8 @@ def search_items():
                 collection_key = collection_name.split(":", 1)[-1].strip()
                 search_params["collection"] = collection_key
             else:
-                collection_keys = get_collection_keys_by_name(api_key, user_id, collection_name, headers)
+                collection_refs = get_collection_keys_by_name(api_key, user_id, collection_name, headers)
+                collection_keys = [ref["key"] for ref in collection_refs]
                 if collection_keys:
                     search_params["collection"] = ",".join(collection_keys)
 
@@ -749,7 +750,8 @@ def get_notes():
                 if collection_name.startswith("collectionkey:"):
                     search_params["collection"] = collection_name.split(":", 1)[-1].strip()
                 else:
-                    collection_keys = get_collection_keys_by_name(api_key, user_id, collection_name, headers)
+                    collection_refs = get_collection_keys_by_name(api_key, user_id, collection_name, headers)
+                    collection_keys = [ref["key"] for ref in collection_refs]
                     if collection_keys:
                         search_params["collection"] = ",".join(collection_keys)
 
@@ -841,7 +843,8 @@ def read_pdf():
                 if collection_name.startswith("collectionkey:"):
                     search_params["collection"] = collection_name.split(":", 1)[-1].strip()
                 else:
-                    collection_keys = get_collection_keys_by_name(api_key, user_id, collection_name, headers)
+                    collection_refs = get_collection_keys_by_name(api_key, user_id, collection_name, headers)
+                    collection_keys = [ref["key"] for ref in collection_refs]
                     if collection_keys:
                         search_params["collection"] = ",".join(collection_keys)
 
