@@ -8,7 +8,7 @@
   "api": {
     "type": "openapi",
     "url": "https://zotero-api.onrender.com/openapi.yaml",
-    "is_user_authenticated": true
+    "is_user_authenticated": false
   },
   "logo_url": "https://zotero-api.onrender.com/logo.png",
   "contact_email": "support@yourdomain.com",
