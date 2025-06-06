@@ -124,31 +124,31 @@ def get_all_collections():
     api_key = request.args.get("api_key")
     if not api_key:
         return jsonify({"error": "Missing Zotero API key"}), 400
+
     try:
         headers = get_headers(api_key)
-
-        # Get user ID
         user_info = requests.get(f"{ZOTERO_BASE_URL}/keys/current", headers=headers).json()
         user_id = user_info["userID"]
 
-        def flatten_collections(collections, parent_map, parent_id=None, prefix=""):
+        def flatten_collections(collections, parent_id=None, prefix=""):
             flat = []
             for col in collections:
                 if col.get("parentCollection") == parent_id:
                     full_name = f"{prefix}/{col['data']['name']}".strip("/")
-                    col["full_path"] = full_name
-                    flat.append(col)
-                    flat += flatten_collections(collections, parent_map, col["data"]["key"], full_name)
+                    flat.append({
+                        "name": col["data"]["name"],
+                        "key": col["data"]["key"],
+                        "full_path": full_name,
+                        "library_type": "personal"
+                    })
+                    flat += flatten_collections(collections, col["data"]["key"], full_name)
             return flat
 
         # Personal collections
         personal_raw = requests.get(
             f"{ZOTERO_BASE_URL}/users/{user_id}/collections", headers=headers
         ).json()
-        personal_map = {col["data"]["key"]: col for col in personal_raw}
-        personal_flat = flatten_collections(personal_raw, personal_map)
-        for col in personal_flat:
-            col["library_type"] = "personal"
+        personal_flat = flatten_collections(personal_raw)
 
         # Group collections
         group_collections = []
@@ -163,13 +163,26 @@ def get_all_collections():
                 group_raw = requests.get(
                     f"{ZOTERO_BASE_URL}/groups/{group_id}/collections", headers=headers
                 ).json()
-                group_map = {col["data"]["key"]: col for col in group_raw}
-                group_flat = flatten_collections(group_raw, group_map)
-                for col in group_flat:
-                    col["library_type"] = group_name
+
+                def flatten_group(collections, parent_id=None, prefix=""):
+                    flat = []
+                    for col in collections:
+                        if col.get("parentCollection") == parent_id:
+                            full_name = f"{prefix}/{col['data']['name']}".strip("/")
+                            flat.append({
+                                "name": col["data"]["name"],
+                                "key": col["data"]["key"],
+                                "full_path": full_name,
+                                "library_type": group_name
+                            })
+                            flat += flatten_group(collections, col["data"]["key"], full_name)
+                    return flat
+
+                group_flat = flatten_group(group_raw)
                 group_collections.extend(group_flat)
+
             except Exception:
-                continue  # skip failing group
+                continue  # skip groups that fail
 
         return jsonify({
             "personal_collections": personal_flat,
@@ -178,7 +191,6 @@ def get_all_collections():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 
 
