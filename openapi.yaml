@@ -30,12 +30,10 @@ paths:
   /all_collections:
     get:
       operationId: getAllCollections
-      summary: List all user collections from both personal and group libraries (default view)
+      summary: List all user collections from both personal and group libraries
       description: |
-        This is the default endpoint to retrieve everything the user has access to in Zotero—
-        including personal collections and all shared group libraries.
-        Use this endpoint to answer broad questions like “What’s in my library?”,
-        “Show my collections”, or “What group libraries do I have access to?”
+        Retrieves everything the user has access to in Zotero—personal collections and shared group libraries.
+        Supports nested structures. Use to answer questions like “What’s in my library?” or “Show my folders”.
       parameters:
         - name: api_key
           in: query
@@ -52,71 +50,144 @@ paths:
       operationId: searchItems
       summary: Search for items by keyword or within a collection
       description: >
-        Searches all items in the user's personal and group Zotero collections.
-        Optionally filters by collection key.
+        Searches items in the user's Zotero collections (personal and group). Can filter by a named or nested collection.
+        Includes fuzzy matching and fallback to broader queries if no direct match is found.
       parameters:
         - name: api_key
           in: query
-          description: Zotero API key of the user
+          description: Zotero API key
           required: true
           schema:
             type: string
         - name: q
           in: query
-          description: Search query string
+          description: Keyword to search for (title, abstract, or author)
           required: false
           schema:
             type: string
         - name: collection
           in: query
-          description: Optional Zotero collection key to restrict the search scope
+          description: Collection name or key to restrict the search
           required: false
           schema:
             type: string
       responses:
         "200":
-          description: A list of Zotero items matching the query or collection
+          description: Matching Zotero items
 
   /notes:
     get:
       operationId: getNotes
-      summary: Get notes for the specified Zotero item
-      description: Retrieves notes attached to a specific Zotero item.
+      summary: Get notes for a specific Zotero item
+      description: Fetches notes attached to a Zotero item (either directly or via title search).
       parameters:
         - name: api_key
           in: query
-          description: Zotero API key of the user
+          description: Zotero API key
           required: true
           schema:
             type: string
         - name: itemKey
           in: query
           description: The Zotero item key
-          required: true
+          required: false
+          schema:
+            type: string
+        - name: q
+          in: query
+          description: Alternative title-based lookup if itemKey is not known
+          required: false
+          schema:
+            type: string
+        - name: collection
+          in: query
+          description: Optional collection scope
+          required: false
           schema:
             type: string
       responses:
         "200":
-          description: Notes for the specified Zotero item
+          description: Notes found for the item
 
   /read_pdf:
     get:
       operationId: readPdf
-      summary: Extract text from a PDF stored in Zotero
-      description: Downloads and extracts text from a PDF file attached to a Zotero item.
+      summary: Extract text from a PDF in Zotero
+      description: >
+        Extracts readable text from a PDF stored in Zotero.
+        Accepts an itemKey or resolves by title within an optional collection context.
       parameters:
         - name: api_key
           in: query
-          description: Zotero API key of the user
+          description: Zotero API key
           required: true
           schema:
             type: string
         - name: itemKey
           in: query
-          description: The Zotero item key for the PDF file
+          description: The Zotero item key (PDF attachment or parent item)
+          required: false
+          schema:
+            type: string
+        - name: title
+          in: query
+          description: Alternative way to resolve item by title
+          required: false
+          schema:
+            type: string
+        - name: collection
+          in: query
+          description: Optional collection context to disambiguate
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Extracted PDF text content
+
+  /summarize_collection:
+    get:
+      operationId: summarizeCollection
+      summary: Summarize a Zotero collection including subcollections
+      description: >
+        Resolves a top-level collection and gathers all items from that collection and its subcollections.
+        Then reads PDFs (if available), extracts text, identifies shared themes, and surfaces any divergent viewpoints.
+      parameters:
+        - name: api_key
+          in: query
+          description: Zotero API key
+          required: true
+          schema:
+            type: string
+        - name: collection
+          in: query
+          description: Name of the collection (folder) to summarize
           required: true
           schema:
             type: string
       responses:
         "200":
-          description: Extracted text content from the PDF
+          description: Collection summary with themes, items, and any content divergence
+
+# Optional for future:
+#  /extract_themes:
+#    post:
+#      operationId: extractThemes
+#      summary: Extract themes and divergence from provided texts
+#      description: >
+#        Accepts a list of raw texts and returns high-level themes and any notable divergence between them.
+#        Useful for external tools that want to reuse the summarization logic without calling /summarize_collection.
+#      requestBody:
+#        required: true
+#        content:
+#          application/json:
+#            schema:
+#              type: object
+#              properties:
+#                texts:
+#                  type: array
+#                  items:
+#                    type: string
+#      responses:
+#        "200":
+#          description: Thematic summary and divergence analysis
