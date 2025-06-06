@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+
+# macOS
+.DS_Store
+
+# Flask & server
+temp.pdf
+instance/
+*.log
+
+# VSCode/IDE
+.vscode/
+.idea/
+
+# Python virtual environments
+venv/
+.env/
