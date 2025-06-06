@@ -6,6 +6,12 @@ from difflib import get_close_matches
 from flask_cors import CORS
 import tempfile
 
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+
+
+
 
 
 
@@ -141,7 +147,7 @@ def get_collection_keys_by_name(api_key, user_id, name, headers):
         col = id_to_collection.get(key)
         if col:
             lib_type = col["library_type"]
-            if lib_type == "personal":
+            if lib_type in ["personal", "user"]:
                 result.append({"key": key, "library_type": "user", "library_id": user_id})
             elif lib_type.startswith("group_"):
                 gid = int(lib_type.split("_")[1])
@@ -484,9 +490,12 @@ def summarize_collection():
     try:
         user_id = get_user_id(api_key)
         headers = get_headers(api_key)
+        app.logger.debug(f"[summarize_collection] User ID: {user_id}")
+        app.logger.debug(f"[summarize_collection] Collection requested: '{collection_name}'")
 
         # Step 1: Get all matching collection references with library metadata
         collection_refs = get_collection_keys_by_name(api_key, user_id, collection_name, headers)
+        app.logger.debug(f"[summarize_collection] Matched collections: {collection_refs}")
         if not collection_refs:
             return jsonify({"error": f"No matching collection found for '{collection_name}'"}), 404
 
@@ -509,18 +518,29 @@ def summarize_collection():
         # Step 4: Loop through each library
         for (lib_type, lib_id), keys in grouped_keys.items():
             lib_path = f"{lib_type}s/{lib_id}"
-            item_res = requests.get(
-                f"{ZOTERO_BASE_URL}/{lib_path}/items",
-                headers=headers,
-                params={
-                    "format": "json",
-                    "collection": ",".join(keys),
-                    "limit": 200
-                }
-            )
-            items = item_res.json()
+            try:
+                item_res = requests.get(
+                    f"{ZOTERO_BASE_URL}/{lib_path}/items",
+                    headers=headers,
+                    params={
+                        "format": "json",
+                        "collection": ",".join(keys),
+                        "limit": 200
+                    }
+                )
+                app.logger.debug(f"[summarize_collection] Request URL: {item_res.url}")
+                app.logger.debug(f"[summarize_collection] Status Code: {item_res.status_code}")
+                items = item_res.json()
+            except Exception as e:
+                app.logger.error(f"[summarize_collection] Error fetching items: {e}")
+                return jsonify({"error": "Failed to fetch items from Zotero"}), 500
+
+
+
+
 
             for item in items:
+                app.logger.debug(f"[summarize_collection] Processing item: {item.get('data', {}).get('title', 'Untitled')}")
                 data = item.get("data", {})
                 key = item.get("key")
                 title = data.get("title", "Untitled")
