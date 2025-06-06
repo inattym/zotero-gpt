@@ -9,7 +9,7 @@ info:
   version: "1.0.0"
 
 servers:
-  - url: https://zotero-api.onrender.com
+  - url: https://zotero-gpt.onrender.com
 
 paths:
   /ping:
