@@ -330,20 +330,26 @@ def summarize_collection():
     try:
         user_id = get_user_id(api_key)
         headers = get_headers(api_key)
-        
-        # Resolve collection key(s)
-        collection_keys = get_collection_keys_by_name(api_key, user_id, collection_name, headers)
-        if not collection_keys:
+
+        # Step 1: Resolve top-level matching collection(s)
+        root_keys = get_collection_keys_by_name(api_key, user_id, collection_name, headers)
+        if not root_keys:
             return jsonify({"error": f"No matching collection found for '{collection_name}'"}), 404
 
-        # Fetch all items in the collection
+        # Step 2: Recursively gather all subcollection keys
+        nested_map = get_all_nested_keys(api_key, user_id, headers)
+        all_keys = set(root_keys)
+        for k in root_keys:
+            all_keys.update(nested_map.get(k, []))
+
+        # Step 3: Fetch all items across root + subcollections
         item_res = requests.get(
             f"{ZOTERO_BASE_URL}/users/{user_id}/items",
             headers=headers,
             params={
                 "format": "json",
-                "collection": ",".join(collection_keys),
-                "limit": 100
+                "collection": ",".join(all_keys),
+                "limit": 150
             }
         )
         items = item_res.json()
@@ -360,9 +366,8 @@ def summarize_collection():
             item_type = data.get("itemType")
             creators = [c.get("lastName", "") for c in data.get("creators", [])]
 
-            # Skip unless it's a parent item or attachment with PDF
             if item_type != "attachment":
-                # Try to fetch children for PDF
+                # Fetch child attachments
                 child_res = requests.get(
                     f"{ZOTERO_BASE_URL}/users/{user_id}/items/{key}/children",
                     headers=headers
@@ -371,7 +376,6 @@ def summarize_collection():
                 for child in children:
                     if child["data"].get("itemType") == "attachment" and \
                        child["data"].get("contentType") == "application/pdf":
-                        # Extract and summarize PDF
                         text = extract_pdf_text(api_key, user_id, child["key"], headers)
                         if text:
                             pdf_summaries.append({"title": title, "creators": creators, "text": text})
@@ -389,7 +393,7 @@ def summarize_collection():
                 "titles": fallback_titles
             })
 
-        # Basic thematic aggregation
+        # Basic theme aggregation
         themes = extract_themes([s["text"] for s in pdf_summaries])
         divergence = detect_divergence([s["text"] for s in pdf_summaries])
 
@@ -403,6 +407,48 @@ def summarize_collection():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+
+
+
+
+
+
+
+def get_all_nested_keys(api_key, user_id, headers):
+    res = requests.get(f"{ZOTERO_BASE_URL}/users/{user_id}/collections", headers=headers)
+    all_collections = res.json()
+
+    parent_map = {}
+    for c in all_collections:
+        parent = c["data"].get("parentCollection")
+        if parent:
+            parent_map.setdefault(parent, []).append(c["data"]["key"])
+
+    def gather(k):
+        out = set()
+        children = parent_map.get(k, [])
+        out.update(children)
+        for c in children:
+            out.update(gather(c))
+        return out
+
+    nested = {}
+    for c in all_collections:
+        k = c["data"]["key"]
+        nested[k] = gather(k)
+
+    return nested
+
+
+
+
+
+
+
+
+
 
 
 def extract_pdf_text(api_key, user_id, item_key, headers):
