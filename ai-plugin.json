@@ -7,10 +7,10 @@
   "auth": { "type": "none" },
   "api": {
     "type": "openapi",
-    "url": "https://zotero-api.onrender.com/openapi.yaml",
+    "url": "https://zotero-gpt.onrender.com/openapi.yaml",
     "is_user_authenticated": false
   },
-  "logo_url": "https://zotero-api.onrender.com/logo.png",
-  "contact_email": "inatemellish@protonmail.com",
-  "legal_info_url": "https://zotero-api.onrender.com/privacy"
+  "logo_url": "https://zotero-gpt.onrender.com/logo.png",
+  "contact_email": "inattmellish@protonmail.com",
+  "legal_info_url": "https://zotero-gpt.onrender.com/privacy"
 }
