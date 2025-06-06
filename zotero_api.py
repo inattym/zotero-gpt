@@ -722,6 +722,30 @@ def read_pdf():
 
 
 
+# Optional endpoint: extract themes + divergence from raw text (outside Zotero)
+
+"""
+@app.route("/extract_themes", methods=["POST"])
+def extract_themes_endpoint():
+    data = request.json
+    texts = data.get("texts", [])
+
+    if not texts or not isinstance(texts, list):
+        return jsonify({"error": "Provide a list of 'texts'"}), 400
+
+    themes = extract_themes(texts)
+    divergence = detect_divergence(texts)
+
+    return jsonify({
+        "themes": themes,
+        "divergent": divergence
+    })
+"""
+
+
+
+
+
 
 
 # Serve static files
